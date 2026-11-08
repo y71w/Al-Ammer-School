@@ -1,0 +1,44 @@
+{
+  "rules": {
+    ".read": "auth != null && auth.token.email === 'ADMIN_EMAIL_HERE'",
+    ".write": "auth != null && auth.token.email === 'ADMIN_EMAIL_HERE'",
+    "announcement": { ".read": true },
+    "rooms": {
+      "$code": {
+        ".write": "auth != null && data.child('meta/owner').val() === auth.uid",
+        "meta": {
+          ".read": true,
+          ".write": "auth != null && !data.exists() && newData.child('owner').val() === auth.uid"
+        },
+        "secret": {
+          ".read": "auth != null && root.child('rooms/' + $code + '/meta/owner').val() === auth.uid",
+          ".write": "auth != null && root.child('rooms/' + $code + '/meta/owner').val() === auth.uid"
+        },
+        "players": {
+          ".read": true,
+          "$uid": {
+            "name": {
+              ".write": "auth != null && auth.uid === $uid",
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20"
+            }
+          }
+        },
+        "found": {
+          "$round": {
+            "$uid": {
+              ".read": "auth != null && (auth.uid === $uid || root.child('rooms/' + $code + '/meta/owner').val() === auth.uid)"
+            }
+          }
+        },
+        "reveal": { ".read": true },
+        "guesses": {
+          ".read": "auth != null && root.child('rooms/' + $code + '/meta/owner').val() === auth.uid",
+          "$gid": {
+            ".write": "auth != null && !data.exists() && newData.child('uid').val() === auth.uid",
+            ".validate": "newData.hasChildren(['uid','r','text','t']) && newData.child('text').val().length <= 40"
+          }
+        }
+      }
+    }
+  }
+}

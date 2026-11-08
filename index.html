@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Al-Ammer School Game</title>
+<style>
+:root{--board:#1d3b34;--chalk:#f4f7f2;--pencil:#f1c232;--paper:#e9f0ee;--ink:#17231f;--mut:#5d6f69;--ok:#1f8a5b;--bad:#c2410c;--line:#c9d6d1}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 "Trebuchet MS",Verdana,sans-serif}
+header{background:var(--board);color:var(--chalk);padding:18px 16px;text-align:center;border-bottom:6px solid var(--pencil)}
+header h1{margin:0;font-size:1.6rem;cursor:pointer;user-select:none}
+header p{margin:2px 0 0;opacity:.8}
+#announce{background:var(--pencil);padding:8px 16px;text-align:center;font-weight:bold}
+main{max-width:760px;margin:18px auto;padding:0 14px}
+footer{text-align:center;color:var(--mut);padding:24px 10px;font-size:.9rem}
+.card{background:#fff;border:2px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.card h2,.card h3{margin:0 0 10px}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.wrap{flex-wrap:wrap;justify-content:flex-start}
+.center{text-align:center}.muted{color:var(--mut);font-size:.92rem}
+input,textarea{width:100%;padding:10px 12px;margin:0 0 10px;border:2px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+input[type=checkbox]{width:auto;margin:0 6px 0 0}label input[type=number]{width:90px;margin-left:8px}
+input:focus,textarea:focus,button:focus-visible{outline:3px solid var(--pencil);outline-offset:1px}
+button{background:var(--board);color:var(--chalk);border:0;border-radius:8px;padding:10px 16px;font:inherit;font-weight:bold;cursor:pointer}
+button:hover{filter:brightness(1.2)}
+button.ghost{background:#fff;color:var(--board);border:2px solid var(--board)}
+button.danger{background:var(--bad)}
+.code{font-size:1.4rem;letter-spacing:.2em;background:var(--board);color:var(--pencil);padding:2px 10px;border-radius:6px}
+#q{font-size:1.5rem;margin:6px 0 12px;text-align:center}
+#timer{font-size:2rem;font-weight:bold;min-width:56px;text-align:center}
+.barwrap{flex:1;height:14px;background:var(--line);border-radius:7px;overflow:hidden}
+#bar{height:100%;width:100%;background:var(--ok);transition:width .2s linear}
+#slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:14px 0}
+.slot{border:2px dashed var(--line);border-radius:8px;padding:10px;text-align:center;min-height:56px;color:var(--mut)}
+.slot.ok{border:2px solid var(--ok);background:#e5f5ec;color:var(--ink)}
+.slot.miss{border-color:var(--bad);color:var(--bad)}
+.slot small{display:block;color:var(--ok);font-weight:bold}
+.p{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line)}
+.p.me{background:#fff6d6;font-weight:bold}
+.p button{padding:2px 8px;margin-left:8px}
+.host{border-color:var(--pencil)}
+table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid var(--line)}
+@media(prefers-color-scheme:dark){:root{--paper:#121a17;--ink:#e8efec;--line:#33463f;--mut:#9db0a9}.card,input,textarea{background:#1a2521}button.ghost{background:transparent;color:var(--chalk);border-color:var(--chalk)}.p.me{background:#3a3414}.slot.ok{background:#173b2a}}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="logo">🏫 Al-Ammer School Game</h1>
+  <p>Managed by Yousef</p>
+</header>
+<div id="announce" hidden></div>
+<main id="app"><p class="center muted">Loading…</p></main>
+<footer>Al-Ammer School Game · managed by Yousef</footer>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* ====== 1. PASTE YOUR FIREBASE CONFIG HERE (see README) ====== */
+const firebaseConfig = {
+  apiKey: "PASTE_HERE",
+  authDomain: "PASTE_HERE",
+  databaseURL: "PASTE_HERE",
+  projectId: "PASTE_HERE",
+  appId: "PASTE_HERE"
+};
+/* ============================================================== */
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth(), db = firebase.database(), TS = firebase.database.ServerValue.TIMESTAMP;
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Normalise answers: ignore case, accents, Arabic diacritics/hamza variants, spaces, and a trailing "s"
+const norm = s => String(s).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f\u064B-\u065F\u0670]/g,'')
+  .replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[^\p{L}\p{N}]/gu,'').replace(/s$/,'');
+
+const DEFAULT_ROUNDS =
+`What can you find in a bedroom? | bed, pillow, blanket, wardrobe/closet, lamp, mirror, curtain, carpet, clock/alarm clock, desk
+What can you find in a kitchen? | fridge/refrigerator, stove/oven, sink, knife, spoon, fork, plate, cup/mug, pot, microwave
+What is in your school bag? | book, pen, pencil, ruler, eraser, notebook, calculator, scissors, glue, sharpener`;
+
+let me, offset = 0, started = false, code = null, isHost = false, meta = null, secret = null;
+let players = {}, reveal = {}, myFound = {}, joined = false, busy = false, unsubs = [], foundOff = null, tm = null;
+const listen = (path, ev, cb) => { const r = db.ref(path); r.on(ev, cb); unsubs.push(() => r.off(ev, cb)); };
+const now = () => Date.now() + offset;
+
+function cleanup() {
+  unsubs.forEach(f => f()); unsubs = []; if (foundOff) foundOff(); foundOff = null; clearInterval(tm);
+  meta = secret = null; players = {}; reveal = {}; myFound = {}; joined = false; isHost = false;
+}
+
+/* ---------- start-up ---------- */
+db.ref('.info/serverTimeOffset').on('value', s => offset = s.val() || 0);
+db.ref('announcement').on('value', s => { const a = $('#announce'), v = s.val(); a.hidden = !v; a.textContent = v ? '📢 ' + v : ''; });
+auth.onAuthStateChanged(u => {
+  if (!u) { auth.signInAnonymously(); return; }
+  me = u;
+  if (!started) { started = true; route(); } else if (location.hash === '#admin') adminView();
+});
+window.addEventListener('hashchange', () => me && route());
+
+/* ---------- hidden admin entry: click the title 5x, Ctrl+Shift+A, or #admin ---------- */
+let clicks = 0;
+$('#logo').onclick = () => { if (++clicks >= 5) { clicks = 0; location.hash = '#admin'; } setTimeout(() => clicks = 0, 2500); };
+addEventListener('keydown', e => { if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); location.hash = '#admin'; } });
+
+function route() {
+  if (location.hash === '#admin') return adminView();
+  const saved = localStorage.room;
+  if (saved) { enterRoom(saved); return; }
+  home();
+}
+
+/* ---------- home ---------- */
+function home() {
+  cleanup(); code = null; localStorage.removeItem('room');
+  const rp = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
+  $('#app').innerHTML = `
+  <div class="card"><h2>Who are you?</h2>
+    <input id="name" placeholder="Your name" maxlength="20" value="${esc(localStorage.name || '')}"></div>
+  <div class="card"><h2>Join a room</h2>
+    <input id="jc" placeholder="Room code" maxlength="5" value="${esc(rp)}" style="text-transform:uppercase;letter-spacing:.2em">
+    <button onclick="join()">Join</button></div>
+  <div class="card"><h2>Create a room</h2>
+    <p class="muted">One round per line: <b>Question | word1, word2, …</b> — use <b>/</b> for accepted alternatives.</p>
+    <textarea id="rounds" rows="7" dir="auto">${esc(DEFAULT_ROUNDS)}</textarea>
+    <label>Seconds per round <input id="dur" type="number" value="15" min="5" max="120"></label><br>
+    <button onclick="createRoom()">Create room</button></div>`;
+}
+function getName() {
+  const n = $('#name').value.trim();
+  if (!n) { alert('Please type your name first.'); return null; }
+  localStorage.name = n; return n;
+}
+async function join() {
+  if (!getName()) return;
+  const c = $('#jc').value.trim().toUpperCase();
+  if (c.length < 3) return alert('Type the room code.');
+  enterRoom(c);
+}
+async function createRoom() {
+  const name = getName(); if (!name) return;
+  const rounds = $('#rounds').value.split('\n').map(l => l.split('|')).map(([q, w]) => ({
+    q: (q || '').trim(), words: (w || '').split(',').map(x => x.trim()).filter(Boolean)
+  })).filter(r => r.q && r.words.length);
+  if (!rounds.length) return alert('Add at least one round.');
+  const dur = Math.min(120, Math.max(5, +$('#dur').value || 15));
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c, tries = 0;
+  do { c = Array.from({length: 5}, () => A[Math.floor(Math.random() * A.length)]).join(); tries++; }
+  while ((await db.ref(`rooms/${c}/meta`).get()).exists() && tries < 10);
+  try {
+    await db.ref(`rooms/${c}/meta`).set({owner: me.uid, ownerName: name, status: 'lobby', round: -1, duration: dur, total: rounds.length, createdAt: TS});
+    await db.ref(`rooms/${c}/secret`).set({rounds});
+  } catch (e) { return alert('Could not create room: ' + e.message); }
+  enterRoom(c);
+}
+
+/* ---------- room ---------- */
+async function enterRoom(c) {
+  cleanup(); code = c;
+  let s; try { s = await db.ref(`rooms/${c}/meta`).get(); } catch (e) { s = null; }
+  if (!s || !s.exists()) { alert('Room not found.'); return home(); }
+  meta = s.val(); isHost = meta.owner === me.uid;
+  localStorage.room = c;
+  if (!isHost) {
+    if (!localStorage.name) { alert('Type your name first.'); return home(); }
+    await db.ref(`rooms/${c}/players/${me.uid}/name`).set(localStorage.name);
+  }
+  buildRoom();
+  listen(`rooms/${c}/meta`, 'value', s => {
+    if (!s.exists()) { alert('This room was closed.'); return home(); }
+    const old = meta; meta = s.val();
+    if (!old || old.round !== meta.round) watchFound();
+    update();
+  });
+  listen(`rooms/${c}/players`, 'value', s => {
+    players = s.val() || {};
+    if (!isHost) { if (players[me.uid]) joined = true; else if (joined) { alert('You were removed by the room owner.'); return home(); } }
+    update();
+  });
+  listen(`rooms/${c}/reveal`, 'value', s => { reveal = s.val() || {}; update(); });
+  if (isHost) {
+    secret = (await db.ref(`rooms/${c}/secret`).get()).val();
+    listen(`rooms/${c}/guesses`, 'child_added', s => processGuess(s.val()));
+  }
+  tm = setInterval(tick, 200);
+  watchFound();
+}
+function watchFound() {
+  if (foundOff) foundOff(); foundOff = null; myFound = {};
+  if (isHost || !meta || meta.round < 0) return update();
+  const r = db.ref(`rooms/${code}/found/${meta.round}/${me.uid}`), cb = s => { myFound = s.val() || {}; update(); };
+  r.on('value', cb); foundOff = () => r.off('value', cb);
+}
+function buildRoom() {
+  $('#app').innerHTML = `
+  <div id="room"><div class="card">
+    <div class="row"><span>Room <span class="code">${code}</span> <span id="rinfo" class="muted"></span></span>
+    <button class="ghost" onclick="home()">Leave</button></div>
+    <div id="lobby" class="center"><h2>Waiting for the owner to start…</h2><p class="muted">Share the room code <b>${code}</b> with your classmates.</p></div>
+    <div id="game" hidden><h2 id="q"></h2>
+      <div class="row"><div id="timer">15</div><div class="barwrap"><div id="bar"></div></div></div>
+      <div id="slots"></div>
+      <div id="inputrow" class="row"><input id="g" dir="auto" placeholder="Type a word and press Enter" autocomplete="off" style="margin:0"><button onclick="send()">Send</button></div></div>
+    <div id="final" class="center" hidden></div>
+  </div>
+  <div class="card"><h3>🏆 Leaderboard</h3><div id="board"></div></div>
+  ${isHost ? `<div class="card host"><h3>🎛️ Room owner panel</h3>
+    <div class="row wrap">
+      <button id="bStart" onclick="nextRound()">▶ Start game</button>
+      <button id="bEnd" onclick="endRound()">⏹ End round now</button>
+      <button id="bNext" onclick="nextRound()">⏭ Next round</button>
+      <button class="ghost" onclick="resetGame()">↺ Reset game</button>
+      <button class="ghost" onclick="copyLink()">🔗 Copy invite link</button>
+      <button class="danger" onclick="closeRoom()">🗑 Close room</button></div>
+    <p><label><input type="checkbox" id="auto" checked>Go to next round automatically after 8 seconds</label></p>
+    <p class="muted">Keep this tab open: it runs the game and checks the answers. Use ✕ next to a player to remove them.</p></div>` : ''}
+  </div>`;
+  $('#g').addEventListener('keydown', e => e.key === 'Enter' && send());
+}
+let lastStatus = '';
+function update() {
+  if (!$('#room') || !meta) return;
+  const st = meta.status, r = meta.round;
+  $('#lobby').hidden = st !== 'lobby';
+  $('#game').hidden = !(st === 'playing' || st === 'between');
+  $('#final').hidden = st !== 'ended';
+  $('#rinfo').textContent = r >= 0 ? `· Round ${r + 1} of ${meta.total}` : '';
+  $('#q').textContent = meta.question || '';
+  $('#inputrow').hidden = isHost || st !== 'playing';
+  if (st === 'playing' && lastStatus !== 'playing' && !isHost) $('#g').focus();
+  lastStatus = st;
+  // word slots
+  const rv = reveal[r], n = meta.wordsCount || 0; let h = '';
+  for (let i = 0; i < n; i++) {
+    const f = myFound[i];
+    if (f) h += `<div class="slot ok"><b>${esc(f.w)}</b><small>+${f.pts}</small></div>`;
+    else if (rv) h += `<div class="slot miss">${esc(rv[i])}</div>`;
+    else if (isHost && secret && secret.rounds[r]) h += `<div class="slot">${esc(secret.rounds[r].words[i].split('/')[0])}</div>`;
+    else h += `<div class="slot">${i + 1}</div>`;
+  }
+  if ($('#slots').dataset.h !== h) { $('#slots').innerHTML = h; $('#slots').dataset.h = h; }
+  // leaderboard
+  const list = Object.entries(players).map(([id, p]) => ({id, name: p.name || '?', score: p.score || 0})).sort((a, b) => b.score - a.score);
+  $('#board').innerHTML = list.length ? list.map((p, i) => `<div class="p ${p.id === me.uid ? 'me' : ''}"><span>${i + 1}. ${esc(p.name)}</span><span>${p.score}${isHost ? `<button class="danger" onclick="kick('${p.id}')" title="Remove">✕</button>` : ''}</span></div>`).join('') : '<p class="muted">No players yet.</p>';
+  if (st === 'ended') $('#final').innerHTML = `<h2>🎉 Game over!</h2>${list[0] ? `<p style="font-size:1.4rem">Winner: <b>${esc(list[0].name)}</b> with ${list[0].score} points</p>` : ''}`;
+  if (isHost) {
+    $('#bStart').hidden = st !== 'lobby'; $('#bEnd').hidden = st !== 'playing'; $('#bNext').hidden = st !== 'between';
+    $('#bNext').textContent = r + 1 >= meta.total ? '🏁 Finish game' : '⏭ Next round';
+  }
+}
+function tick() {
+  if (!meta) return;
+  const rem = Math.max(0, meta.duration - (now() - meta.roundStart) / 1000);
+  if (meta.status === 'playing' && $('#timer')) { $('#timer').textContent = Math.ceil(rem); $('#bar').style.width = (rem / meta.duration * 100) + '%'; }
+  else if ($('#timer')) { $('#timer').textContent = '0'; $('#bar').style.width = '0%'; }
+  if (!isHost || busy || !secret) return;
+  if (meta.status === 'playing' && now() - meta.roundStart > meta.duration * 1000 + 800) { busy = true; endRound().finally(() => busy = false); }
+  else if (meta.status === 'between' && $('#auto') && $('#auto').checked && meta.betweenAt && now() - meta.betweenAt > 8000) { busy = true; nextRound().finally(() => busy = false); }
+}
+
+/* ---------- player: send a guess ---------- */
+function send() {
+  const v = $('#g').value.trim();
+  if (!v || !meta || meta.status !== 'playing') return;
+  db.ref(`rooms/${code}/guesses`).push({uid: me.uid, r: meta.round, text: v.slice(0, 40), t: TS});
+  $('#g').value = '';
+}
+
+/* ---------- owner: game engine ---------- */
+async function nextRound() {
+  const r = meta.round + 1;
+  if (r >= meta.total) return db.ref(`rooms/${code}/meta`).update({status: 'ended'});
+  const rd = secret.rounds[r];
+  await db.ref(`rooms/${code}/meta`).update({status: 'playing', round: r, question: rd.q, wordsCount: rd.words.length, roundStart: TS});
+}
+async function endRound() {
+  if (meta.status !== 'playing') return;
+  const w = secret.rounds[meta.round].words.map(x => x.split('/')[0]);
+  await db.ref(`rooms/${code}/reveal/${meta.round}`).set(w);
+  await db.ref(`rooms/${code}/meta`).update({status: 'between', betweenAt: TS});
+}
+async function processGuess(g) {
+  if (!meta || !secret || g.r !== meta.round || !['playing', 'between'].includes(meta.status) || !players[g.uid]) return;
+  const el = (g.t - meta.roundStart) / 1000;
+  if (el < 0 || el > meta.duration + 0.5) return;
+  const words = secret.rounds[g.r].words, n = norm(g.text); if (!n) return;
+  const idx = words.findIndex(w => w.split('/').some(a => norm(a) === n)); if (idx < 0) return;
+  const pts = 10 + Math.round(Math.max(0, 1 - el / meta.duration) * 90);   // 100 pts instantly … 10 pts at the buzzer
+  const res = await db.ref(`rooms/${code}/found/${g.r}/${g.uid}/${idx}`).transaction(c => c === null ? {pts, w: words[idx].split('/')[0]} : undefined);
+  if (res.committed) db.ref(`rooms/${code}/players/${g.uid}/score`).transaction(s => (s || 0) + pts);
+}
+async function kick(id) { if (confirm('Remove this player?')) db.ref(`rooms/${code}/players/${id}`).remove(); }
+async function resetGame() {
+  if (!confirm('Reset all scores and go back to the lobby?')) return;
+  const u = {found: null, reveal: null, guesses: null, 'meta/status': 'lobby', 'meta/round': -1, 'meta/question': null};
+  Object.keys(players).forEach(id => u[`players/${id}/score`] = null);
+  await db.ref(`rooms/${code}`).update(u);
+}
+async function closeRoom() { if (confirm('Close this room for everyone?')) { await db.ref(`rooms/${code}`).remove(); } }
+function copyLink() {
+  const l = location.origin + location.pathname + '?room=' + code;
+  (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => alert('Link copied!'), () => prompt('Copy this link:', l));
+}
+
+/* ---------- hidden super-admin panel ---------- */
+function adminView() {
+  cleanup(); code = null; localStorage.removeItem('room');
+  if (!me.email) {
+    $('#app').innerHTML = `<div class="card"><h2>🔒 Admin sign-in</h2>
+      <input id="ae" type="email" placeholder="Admin email"><input id="ap" type="password" placeholder="Password">
+      <div class="row wrap"><button onclick="adminLogin()">Sign in</button><button class="ghost" onclick="location.hash='';location.reload()">Back</button></div></div>`;
+    return;
+  }
+  $('#app').innerHTML = `<div class="card host"><div class="row"><h2>🛡️ Admin panel</h2><button class="ghost" onclick="adminOut()">Sign out</button></div>
+    <h3>Site-wide announcement</h3><input id="an" placeholder="Message shown to everyone (empty = remove)">
+    <button onclick="db.ref('announcement').set($('#an').value.trim()||null)">Publish</button></div>
+    <div class="card"><h3>All rooms</h3><div id="rooms"><p class="muted">Loading…</p></div></div>`;
+  listen('rooms', 'value', s => {
+    const all = s.val() || {}, ks = Object.keys(all);
+    $('#rooms').innerHTML = ks.length ? '<table>' + ks.map(k => {
+      const m = all[k].meta || {}, pc = Object.keys(all[k].players || {}).length;
+      return `<tr><td><b>${esc(k)}</b></td><td>${esc(m.ownerName || '?')}</td><td>${esc(m.status || '')} (${(m.round || 0) + 1}/${m.total || 0})</td><td>${pc} players</td>
+      <td><button class="ghost" onclick="adminWords('${k}')">Words</button> <button class="danger" onclick="adminDel('${k}')">Delete</button></td></tr>`;
+    }).join('') + '</table>' : '<p class="muted">No rooms yet.</p>';
+  });
+}
+async function adminLogin() {
+  try { await auth.signInWithEmailAndPassword($('#ae').value.trim(), $('#ap').value); }
+  catch (e) { alert('Sign-in failed: ' + e.message); }
+}
+async function adminOut() { location.hash = ''; await auth.signOut(); location.reload(); }
+async function adminWords(k) {
+  const s = (await db.ref(`rooms/${k}/secret/rounds`).get()).val() || [];
+  alert(s.map((r, i) => `${i + 1}. ${r.q}\n   ${r.words.join(', ')}`).join('\n\n') || 'No data');
+}
+function adminDel(k) { if (confirm('Delete room ' + k + '?')) db.ref('rooms/' + k).remove(); }
+</script>
+</body>
+</html>
